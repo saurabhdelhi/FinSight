@@ -115,6 +115,23 @@ _VOUCHER_COLLECTION_TDL = """<TDL>
         <FinsightToDate>{to_date}</FinsightToDate>
       </STATICVARIABLES>"""
 
+_STOCK_IN_HAND_TDL = """<TDL>
+        <TDLMESSAGE>
+          <COLLECTION NAME="FinSightStockInHand" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No">
+            <TYPE>Group</TYPE>
+            <FETCH>NAME</FETCH>
+            <FETCH>OPENINGBALANCE</FETCH>
+            <FILTER>StockInHandFilter</FILTER>
+          </COLLECTION>
+          <SYSTEM TYPE="Formulae" NAME="StockInHandFilter">
+            $Name = "Stock-in-Hand"
+          </SYSTEM>
+        </TDLMESSAGE>
+      </TDL>
+      <STATICVARIABLES>
+        <SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>
+      </STATICVARIABLES>"""
+
 
 class TallyConnector:
     """
@@ -250,6 +267,16 @@ class TallyConnector:
             data_type="Collection",
             data_id="FinSightVouchers",
             desc_body=desc_body,
+        )
+        return await self._post(xml)
+
+    async def fetch_stock_in_hand_balance(self) -> str:
+        """Fetch the opening balance of the Stock-in-Hand group specifically."""
+        xml = _ENVELOPE.format(
+            request_type="Export",
+            data_type="Collection",
+            data_id="FinSightStockInHand",
+            desc_body=_STOCK_IN_HAND_TDL,
         )
         return await self._post(xml)
 

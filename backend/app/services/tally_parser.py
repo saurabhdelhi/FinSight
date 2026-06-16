@@ -367,3 +367,25 @@ class TallyParser:
 
         logger.info(f"Parsed {len(entries)} trial balance entries from Tally")
         return entries
+
+    @staticmethod
+    def parse_stock_in_hand_balance(xml_text: str) -> Decimal:
+        """Parse opening balance of Stock-in-Hand group."""
+        try:
+            root = ET.fromstring(_sanitize_xml(xml_text))
+        except ET.ParseError as e:
+            raise TallyDataError(f"Failed to parse Stock-in-Hand XML: {e}")
+        
+        for grp_elem in root.iter("GROUP"):
+            name = _text(grp_elem, "NAME")
+            if name and name.strip().lower() == "stock-in-hand":
+                return _decimal(grp_elem, "OPENINGBALANCE")
+        
+        # Fallback to check if there is any balance
+        for op_bal in root.iter("OPENINGBALANCE"):
+            if op_bal.text:
+                try:
+                    return abs(Decimal(op_bal.text.strip().replace(",", "")))
+                except Exception:
+                    pass
+        return Decimal("0.00")

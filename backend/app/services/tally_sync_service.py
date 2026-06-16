@@ -184,10 +184,11 @@ class TallySyncService:
             # ── Step 2.5: Sync Missing Virtual Ledgers (Opening Stock) ──
             try:
                 stock_balance = Decimal("0.00")
-                for pg in parsed_groups:
-                    if pg.name.strip().lower() == "stock-in-hand":
-                        stock_balance = abs(pg.opening_balance)
-                        break
+                try:
+                    sih_xml = await connector.fetch_stock_in_hand_balance()
+                    stock_balance = abs(TallyParser.parse_stock_in_hand_balance(sih_xml))
+                except Exception as sih_err:
+                    logger.warning(f"Failed to fetch stock-in-hand group balance: {sih_err}")
 
                 if abs(stock_balance) > Decimal("0.01"):
                     stock_ledger_exists = any(
