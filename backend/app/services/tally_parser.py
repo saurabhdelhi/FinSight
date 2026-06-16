@@ -35,6 +35,8 @@ class ParsedGroup:
     is_deemedpositive: bool = False
     affects_gross_profit: bool = False
     sort_position: int = 0
+    opening_balance: Decimal = Decimal("0.00")
+    closing_balance: Decimal = Decimal("0.00")
 
 
 @dataclass
@@ -212,6 +214,8 @@ class TallyParser:
                 is_deemedpositive=_bool(grp_elem, "ISDEEMEDPOSITIVE"),
                 affects_gross_profit=_bool(grp_elem, "AFFECTSGROSSPROFIT"),
                 sort_position=_int(grp_elem, "SORTPOSITION"),
+                opening_balance=_decimal(grp_elem, "OPENINGBALANCE"),
+                closing_balance=_decimal(grp_elem, "CLOSINGBALANCE"),
             ))
 
         logger.info(f"Parsed {len(groups)} groups from Tally")

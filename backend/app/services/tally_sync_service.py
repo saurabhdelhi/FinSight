@@ -183,21 +183,11 @@ class TallySyncService:
 
             # ── Step 2.5: Sync Missing Virtual Ledgers (Opening Stock) ──
             try:
-                import xml.etree.ElementTree as ET
-                from app.services.tally_parser import _sanitize_xml
-                tb_xml = await connector.fetch_trial_balance()
-                tb_root = ET.fromstring(_sanitize_xml(tb_xml))
-                current_name = None
                 stock_balance = Decimal("0.00")
-                for child in tb_root:
-                    if child.tag == "DSPACCNAME":
-                        current_name = child.find("DSPDISPNAME").text.strip() if child.find("DSPDISPNAME") is not None and child.find("DSPDISPNAME").text else None
-                    elif child.tag == "DSPACCINFO" and current_name:
-                        if current_name == "Opening Stock":
-                            dramt_elem = child.find(".//DSPCLDRAMTA")
-                            if dramt_elem is not None and dramt_elem.text:
-                                stock_balance = Decimal(dramt_elem.text.strip().replace(",", ""))
-                        current_name = None
+                for pg in parsed_groups:
+                    if pg.name.strip().lower() == "stock-in-hand":
+                        stock_balance = abs(pg.opening_balance)
+                        break
 
                 if abs(stock_balance) > Decimal("0.01"):
                     stock_ledger_exists = any(
@@ -219,7 +209,7 @@ class TallySyncService:
                         await self.db.flush()
                         ledger_name_to_id["Opening Stock"] = virtual_stock.id
             except Exception as tb_err:
-                logger.warning(f"Failed to fetch/parse trial balance for virtual stock: {tb_err}")
+                logger.warning(f"Failed to extract virtual opening stock balance: {tb_err}")
 
             # ── Step 3: Sync Vouchers ────────────────────────────────────
             logger.info(f"[Sync {sync_job.id[:8]}] Fetching vouchers...")
