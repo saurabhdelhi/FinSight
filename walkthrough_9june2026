@@ -1,0 +1,43 @@
+# Walkthrough - Tally Connector and Next.js Param Fixes
+
+I have fixed the issue causing the error on the client dashboard page, solved the Tally connection mapping inside Docker, and resolved the XML entity parsing errors.
+
+## Changes Made
+
+### 1. Next.js Param Unwrapping
+- **File**: [page.tsx](file:///c:/Users/admin/Documents/Saurabh/FinSight/frontend/src/app/dashboard/clients/[id]/page.tsx)
+- **Problem**: Next.js 15+ evaluates route parameters (`params`) as a Promise. Accessing `params.id` synchronously was causing a client-side crash and causing the application to request `/api/clients/undefined` (resulting in a 404 API error).
+- **Solution**: Imported React's `use` hook and unwrapped `params` via `const { id } = use(params);`.
+
+### 2. Docker Tally Connector Host Resolution
+- **File**: [tally_connector.py](file:///c:/Users/admin/Documents/Saurabh/FinSight/backend/app/services/tally_connector.py)
+- **Problem**: When the application runs in Docker, `localhost` refers to the container itself. Connecting to Tally Prime on the host machine using `localhost:9000` failed.
+- **Solution**: Added logic to automatically map `localhost` or `127.0.0.1` to `host.docker.internal` inside the connector when running inside a Docker container.
+
+### 3. Docker Compose Environment Upgrades
+- **File**: [docker-compose.yml](file:///c:/Users/admin/Documents/Saurabh/FinSight/docker-compose.yml)
+- **Changes**:
+  - Added `extra_hosts` defining `host.docker.internal:host-gateway` for the `backend` service to ensure cross-platform resolution of `host.docker.internal`.
+  - Added volumes configuration to the `frontend` service so any local frontend code edits hot-reload inside the container immediately.
+  - Increased `ACCESS_TOKEN_EXPIRE_MINUTES` to `1440` (24 hours) to prevent frequent token expiration during testing sessions.
+
+### 4. Tally TDL Fetch Syntax
+- **File**: [tally_connector.py](file:///c:/Users/admin/Documents/Saurabh/FinSight/backend/app/services/tally_connector.py)
+- **Problem**: The templates had `<FETCHLIST>` wrapper tags which are invalid in Tally TDL. Tally ignored the child `<FETCH>` tags entirely, meaning balances, parent groups, and voucher ledger entries were returned as empty/zero.
+- **Solution**: Removed `<FETCHLIST>` wrapper tags so `<FETCH>` elements are direct child nodes of `<COLLECTION>`.
+
+### 5. XML Sanitization for Invalid Characters
+- **File**: [tally_parser.py](file:///c:/Users/admin/Documents/Saurabh/FinSight/backend/app/services/tally_parser.py)
+- **Problem**: With fields properly fetched, Tally began returning internal binary control characters (like `&#4;` for the `Primary` parent group). In XML 1.0, character entity references below `&#32;` (like `&#4;` or `&#26;`) are strictly illegal, causing XML parser crashes (`reference to invalid character number`).
+- **Solution**: Implemented `_sanitize_xml(xml_text)` using regular expressions to strip out illegal XML control character references before they reach the parser.
+
+---
+
+## Verification Results
+
+### Automated Tests
+- Ran backend unit tests inside the rebuilt container:
+  ```bash
+  docker exec -w /app -e PYTHONPATH=. finsight-backend pytest
+  ```
+  **Result**: `6 passed, 2 warnings in 0.57s`

@@ -268,10 +268,21 @@ class ScheduleIIIMapper:
         if not ledgers:
             raise NoSyncDataError(client_id)
 
-        # Clear existing mappings
+        # Get existing manual overrides to preserve them
+        result = await self.db.execute(
+            select(ScheduleIIIMapping).where(
+                ScheduleIIIMapping.client_id == client_id,
+                ScheduleIIIMapping.is_auto_mapped == False,
+            )
+        )
+        manual_mappings = list(result.scalars().all())
+        overridden_ledgers = {m.ledger_name: m for m in manual_mappings}
+
+        # Clear only existing auto-mapped mappings
         await self.db.execute(
             delete(ScheduleIIIMapping).where(
-                ScheduleIIIMapping.client_id == client_id
+                ScheduleIIIMapping.client_id == client_id,
+                ScheduleIIIMapping.is_auto_mapped == True,
             )
         )
 
@@ -284,10 +295,25 @@ class ScheduleIIIMapper:
             ):
                 continue
 
+            # If this ledger has a manual override, preserve it and update its amount to latest closing balance
+            if ledger.name in overridden_ledgers:
+                m = overridden_ledgers[ledger.name]
+                m.amount = ledger.closing_balance
+                mappings.append(m)
+                continue
+
             # Strategy 1: Group hierarchy walk
             matched_group = self._resolve_group_hierarchy(ledger, groups_by_name)
 
-            if matched_group:
+            # Special case: Profit & Loss A/c should always map to Reserves and Surplus under Shareholders' Funds
+            if ledger.name.lower() in ("profit & loss a/c", "profit and loss", "p&l", "p&l a/c"):
+                line = "Reserves and Surplus"
+                category = "Shareholders' Funds"
+                section = ScheduleSection.BALANCE_SHEET
+                sort = 110
+                confidence = 100.0
+                is_auto = True
+            elif matched_group:
                 line, category, section, sort = TALLY_GROUP_MAPPING[matched_group]
                 confidence = 95.0
                 is_auto = True
@@ -360,11 +386,18 @@ class ScheduleIIIMapper:
         asset_categories = {"Non-Current Assets", "Current Assets"}
 
         for m in mappings:
-            target = equity_liabilities if m.category in equity_categories else assets
+            is_equity_liab = m.category in equity_categories
+            
+            # Normal sign convention:
+            # - Equity & Liabilities are normally Credit (positive in Tally)
+            # - Assets are normally Debit (negative in Tally)
+            val = m.amount if is_equity_liab else -m.amount
+            
+            target = equity_liabilities if is_equity_liab else assets
             if m.category not in target:
                 target[m.category] = {}
             line = m.schedule_iii_line
-            target[m.category][line] = target[m.category].get(line, Decimal("0")) + abs(m.amount)
+            target[m.category][line] = target[m.category].get(line, Decimal("0")) + val
 
         # Calculate totals
         total_el = sum(

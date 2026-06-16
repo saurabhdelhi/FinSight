@@ -32,7 +32,18 @@ async def get_mappings(client_id: str, current_user: CurrentUser, db: DBSession)
     """Get all Schedule III mappings for a client."""
     await _verify_client(client_id, current_user, db)
     mapper = ScheduleIIIMapper(db)
-    mappings = await mapper.map_client(client_id)
+    
+    # Query existing mappings first to avoid unconditional recalculations and race conditions
+    result = await db.execute(
+        select(ScheduleIIIMapping)
+        .where(ScheduleIIIMapping.client_id == client_id)
+        .order_by(ScheduleIIIMapping.sort_order)
+    )
+    mappings = list(result.scalars().all())
+    
+    if not mappings:
+        mappings = await mapper.map_client(client_id)
+        
     return [ScheduleIIIMappingResponse.model_validate(m) for m in mappings]
 
 

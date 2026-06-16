@@ -142,25 +142,30 @@ class ReceivablesExceedRevenue(AuditRule):
         debtor_ledgers = ctx.get_ledgers_in_group_recursive("Sundry Debtors")
         revenue_ledgers = ctx.get_ledgers_in_group_recursive("Sales Accounts")
 
+        total_debtors_opening = sum(abs(l.opening_balance) for l in debtor_ledgers)
         total_debtors = sum(abs(l.closing_balance) for l in debtor_ledgers)
         total_revenue = sum(abs(l.closing_balance) for l in revenue_ledgers)
 
-        if total_revenue > 0 and total_debtors > total_revenue:
-            ratio = (total_debtors / total_revenue * 100) if total_revenue > 0 else 0
+        # Check the net increase in receivables during the year (current year growth)
+        # to ensure we don't flag older outstanding balances carried from prior years.
+        net_receivables_increase = total_debtors - total_debtors_opening
+
+        # We allow a 25% buffer (1.25x) over revenue to account for GST/indirect taxes in receivables billing.
+        if total_revenue > 0 and net_receivables_increase > total_revenue * Decimal("1.25"):
+            ratio = (net_receivables_increase / total_revenue * 100) if total_revenue > 0 else 0
             findings.append(self.finding(
                 title=(
-                    f"Trade receivables (₹{total_debtors:,.2f}) exceed "
-                    f"revenue (₹{total_revenue:,.2f})"
+                    f"Net trade receivables increase (₹{net_receivables_increase:,.2f}) "
+                    f"exceeds revenue (₹{total_revenue:,.2f})"
                 ),
                 description=(
-                    f"Total trade receivables of ₹{total_debtors:,.2f} are "
-                    f"{ratio:.1f}% of annual revenue (₹{total_revenue:,.2f}). "
-                    f"Receivables exceeding revenue is highly unusual and may "
-                    f"indicate fictitious revenue, collectability issues, or "
-                    f"balances carried from prior years."
+                    f"The net increase in trade receivables during the year of ₹{net_receivables_increase:,.2f} "
+                    f"is {ratio:.1f}% of annual revenue (₹{total_revenue:,.2f}). Receivables growth "
+                    f"significantly exceeding revenue (even after a 25% buffer for GST) is highly unusual "
+                    f"and may indicate fictitious revenue, unrecorded credit notes, or cut-off errors."
                 ),
                 severity=Severity.HIGH,
-                amount=total_debtors - total_revenue,
+                amount=net_receivables_increase - total_revenue,
                 recommendation=(
                     "Perform detailed aging analysis. Verify top 10 debtors "
                     "with confirmations. Review revenue recognition policy. "

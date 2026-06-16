@@ -5,33 +5,46 @@ import api, { SyncJob } from '@/lib/api';
 import { RefreshCw, CheckCircle2, XCircle, Clock, Database, Wifi, WifiOff } from 'lucide-react';
 import { formatDateTime, timeAgo, cn } from '@/lib/utils';
 
-export function SyncTab({ clientId, lastSyncedAt }: { clientId: string, lastSyncedAt?: string }) {
+export function SyncTab({ 
+  clientId, 
+  lastSyncedAt, 
+  onSyncComplete 
+}: { 
+  clientId: string; 
+  lastSyncedAt?: string; 
+  onSyncComplete?: () => void; 
+}) {
   const [syncHistory, setSyncHistory] = useState<SyncJob[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [testStatus, setTestStatus] = useState<{success?: boolean, message?: string, testing: boolean}>({ testing: false });
   const [loading, setLoading] = useState(true);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (wasPreviouslySyncing?: boolean) => {
     try {
       const history = await api.getSyncHistory(clientId);
       setSyncHistory(history);
-      if (history.length > 0 && history[0].status === 'running') {
-        setIsSyncing(true);
-      } else {
-        setIsSyncing(false);
+      const isCurrentlyRunning = history.length > 0 && history[0].status === 'running';
+      setIsSyncing(isCurrentlyRunning);
+      
+      // If it was syncing in the background, and now it finished, notify parent
+      if (wasPreviouslySyncing === true && !isCurrentlyRunning && onSyncComplete) {
+        onSyncComplete();
       }
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [clientId]);
+  }, [clientId, onSyncComplete]);
 
   useEffect(() => {
     loadData();
+  }, [clientId]);
+
+  useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isSyncing) {
-      interval = setInterval(loadData, 5000);
+      interval = setInterval(() => loadData(true), 5000);
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -53,6 +66,9 @@ export function SyncTab({ clientId, lastSyncedAt }: { clientId: string, lastSync
     try {
       await api.triggerSync(clientId);
       await loadData();
+      if (onSyncComplete) {
+        onSyncComplete();
+      }
     } catch (err: any) {
       alert(err.message || 'Sync failed to start');
       setIsSyncing(false);

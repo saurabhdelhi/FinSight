@@ -13,6 +13,7 @@ Handles Tally-specific quirks:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from xml.etree import ElementTree as ET
@@ -133,6 +134,25 @@ def _int(element: ET.Element | None, tag: str, default: int = 0) -> int:
 
 # ── Parser class ─────────────────────────────────────────────────────────
 
+_CHAR_REF_RE = re.compile(r'&#(\d+);|&#[xX]([0-9a-fA-F]+);')
+
+
+def _sanitize_xml(xml_text: str) -> str:
+    """Remove invalid XML character entities like &#4; or &#26; that Tally returns."""
+    def replace_entity(match):
+        dec_val = match.group(1)
+        hex_val = match.group(2)
+        try:
+            val = int(dec_val) if dec_val else int(hex_val, 16)
+            # XML 1.0 valid chars: 0x9, 0xA, 0xD, [0x20-0xD7FF]
+            if val in (9, 10, 13) or val >= 32:
+                return match.group(0)
+            return ""  # strip invalid control characters
+        except ValueError:
+            return ""
+    return _CHAR_REF_RE.sub(replace_entity, xml_text)
+
+
 class TallyParser:
     """Parses Tally XML responses into typed Python objects."""
 
@@ -140,7 +160,7 @@ class TallyParser:
     def parse_company_info(xml_text: str) -> list[ParsedCompanyInfo]:
         """Parse company list response."""
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             raise TallyDataError(f"Failed to parse company XML: {e}")
 
@@ -170,7 +190,7 @@ class TallyParser:
     def parse_groups(xml_text: str) -> list[ParsedGroup]:
         """Parse group collection response."""
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             raise TallyDataError(f"Failed to parse groups XML: {e}")
 
@@ -201,7 +221,7 @@ class TallyParser:
     def parse_ledgers(xml_text: str) -> list[ParsedLedger]:
         """Parse ledger collection response."""
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             raise TallyDataError(f"Failed to parse ledgers XML: {e}")
 
@@ -241,7 +261,7 @@ class TallyParser:
     def parse_vouchers(xml_text: str) -> list[ParsedVoucher]:
         """Parse voucher collection response with ledger entries."""
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             raise TallyDataError(f"Failed to parse vouchers XML: {e}")
 
@@ -249,6 +269,10 @@ class TallyParser:
         for vch_elem in root.iter("VOUCHER"):
             guid = _text(vch_elem, "GUID") or vch_elem.get("GUID")
             date_str = _text(vch_elem, "DATE")
+
+            # Skip VOUCHER tags that don't represent actual transactions (e.g. metadata/counts in headers)
+            if not guid and not date_str:
+                continue
 
             voucher = ParsedVoucher(
                 guid=guid or None,
@@ -298,7 +322,7 @@ class TallyParser:
         The trial balance from Tally comes as a DSPACCNAME / DSPCLBAL report.
         """
         try:
-            root = ET.fromstring(xml_text)
+            root = ET.fromstring(_sanitize_xml(xml_text))
         except ET.ParseError as e:
             raise TallyDataError(f"Failed to parse trial balance XML: {e}")
 

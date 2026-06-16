@@ -36,6 +36,7 @@ class ApiClient {
     }
 
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      cache: 'no-store',
       ...options,
       headers,
     });

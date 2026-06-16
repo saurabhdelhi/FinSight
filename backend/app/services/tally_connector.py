@@ -46,21 +46,19 @@ _LEDGER_COLLECTION_TDL = """<TDL>
         <TDLMESSAGE>
           <COLLECTION NAME="FinSightLedgers" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No">
             <TYPE>Ledger</TYPE>
-            <FETCHLIST>
-              <FETCH>NAME</FETCH>
-              <FETCH>PARENT</FETCH>
-              <FETCH>OPENINGBALANCE</FETCH>
-              <FETCH>CLOSINGBALANCE</FETCH>
-              <FETCH>GUID</FETCH>
-              <FETCH>ALTERID</FETCH>
-              <FETCH>ADDRESS.LIST</FETCH>
-              <FETCH>LEDSTATENAME</FETCH>
-              <FETCH>GSTREGISTRATIONTYPE</FETCH>
-              <FETCH>PARTYGSTIN</FETCH>
-              <FETCH>INCOMETAXNUMBER</FETCH>
-              <FETCH>ISBILLWISEON</FETCH>
-              <FETCH>ISCOSTCENTRESON</FETCH>
-            </FETCHLIST>
+            <FETCH>NAME</FETCH>
+            <FETCH>PARENT</FETCH>
+            <FETCH>OPENINGBALANCE</FETCH>
+            <FETCH>CLOSINGBALANCE</FETCH>
+            <FETCH>GUID</FETCH>
+            <FETCH>ALTERID</FETCH>
+            <FETCH>ADDRESS.LIST</FETCH>
+            <FETCH>LEDSTATENAME</FETCH>
+            <FETCH>GSTREGISTRATIONTYPE</FETCH>
+            <FETCH>PARTYGSTIN</FETCH>
+            <FETCH>INCOMETAXNUMBER</FETCH>
+            <FETCH>ISBILLWISEON</FETCH>
+            <FETCH>ISCOSTCENTRESON</FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -72,16 +70,14 @@ _GROUP_COLLECTION_TDL = """<TDL>
         <TDLMESSAGE>
           <COLLECTION NAME="FinSightGroups" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No">
             <TYPE>Group</TYPE>
-            <FETCHLIST>
-              <FETCH>NAME</FETCH>
-              <FETCH>PARENT</FETCH>
-              <FETCH>GUID</FETCH>
-              <FETCH>ALTERID</FETCH>
-              <FETCH>ISREVENUE</FETCH>
-              <FETCH>ISDEEMEDPOSITIVE</FETCH>
-              <FETCH>AFFECTSGROSSPROFIT</FETCH>
-              <FETCH>SORTPOSITION</FETCH>
-            </FETCHLIST>
+            <FETCH>NAME</FETCH>
+            <FETCH>PARENT</FETCH>
+            <FETCH>GUID</FETCH>
+            <FETCH>ALTERID</FETCH>
+            <FETCH>ISREVENUE</FETCH>
+            <FETCH>ISDEEMEDPOSITIVE</FETCH>
+            <FETCH>AFFECTSGROSSPROFIT</FETCH>
+            <FETCH>SORTPOSITION</FETCH>
           </COLLECTION>
         </TDLMESSAGE>
       </TDL>
@@ -93,23 +89,21 @@ _VOUCHER_COLLECTION_TDL = """<TDL>
         <TDLMESSAGE>
           <COLLECTION NAME="FinSightVouchers" ISMODIFY="No" ISFIXED="No" ISINITIALIZE="No">
             <TYPE>Voucher</TYPE>
-            <FETCHLIST>
-              <FETCH>DATE</FETCH>
-              <FETCH>GUID</FETCH>
-              <FETCH>ALTERID</FETCH>
-              <FETCH>VOUCHERTYPENAME</FETCH>
-              <FETCH>VOUCHERNUMBER</FETCH>
-              <FETCH>PARTYLEDGERNAME</FETCH>
-              <FETCH>AMOUNT</FETCH>
-              <FETCH>NARRATION</FETCH>
-              <FETCH>ISCANCELLED</FETCH>
-              <FETCH>ISOPTIONAL</FETCH>
-              <FETCH>ALLLEDGERENTRIES.LIST</FETCH>
-            </FETCHLIST>
+            <FETCH>DATE</FETCH>
+            <FETCH>GUID</FETCH>
+            <FETCH>ALTERID</FETCH>
+            <FETCH>VOUCHERTYPENAME</FETCH>
+            <FETCH>VOUCHERNUMBER</FETCH>
+            <FETCH>PARTYLEDGERNAME</FETCH>
+            <FETCH>AMOUNT</FETCH>
+            <FETCH>NARRATION</FETCH>
+            <FETCH>ISCANCELLED</FETCH>
+            <FETCH>ISOPTIONAL</FETCH>
+            <FETCH>ALLLEDGERENTRIES.LIST</FETCH>
             <FILTER>FinsightDateFilter</FILTER>
           </COLLECTION>
           <SYSTEM TYPE="Formulae" NAME="FinsightDateFilter">
-              $Date &gt;= $FinsightFromDate AND $Date &lt;= $FinsightToDate
+              $Date &gt;= ##FinsightFromDate AND $Date &lt;= ##FinsightToDate
           </SYSTEM>
         </TDLMESSAGE>
       </TDL>
@@ -134,14 +128,29 @@ class TallyConnector:
         host: str = "localhost",
         port: int = 9000,
         timeout: int = 30,
+        company_name: str | None = None,
     ):
+        import os
+        is_docker = os.path.exists('/.dockerenv') or os.path.exists('/run/secrets/kubernetes.io')
+        if is_docker and host in ("localhost", "127.0.0.1"):
+            logger.info(f"Mapping host '{host}' to 'host.docker.internal' since running inside Docker container")
+            host = "host.docker.internal"
+
         self.host = host
         self.port = port
         self.base_url = f"http://{host}:{port}"
         self.timeout = timeout
+        self.company_name = company_name
 
     async def _post(self, xml_payload: str) -> str:
         """Send an XML POST to Tally and return the response body."""
+        if self.company_name and "<STATICVARIABLES>" in xml_payload:
+            import html
+            escaped_company = html.escape(self.company_name)
+            xml_payload = xml_payload.replace(
+                "<STATICVARIABLES>",
+                f"<STATICVARIABLES>\n        <SVCURRENTCOMPANY>{escaped_company}</SVCURRENTCOMPANY>"
+            )
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(

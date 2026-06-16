@@ -15,7 +15,7 @@ export default function NewClientPage() {
     company_name: '',
     tally_host: 'localhost',
     tally_port: 9000,
-    financial_year: '2025-2026',
+    financial_year: '2026-2027',
     company_number: '',
     gstin: '',
     pan: '',
@@ -81,6 +81,8 @@ export default function NewClientPage() {
                 value={form.financial_year}
                 onChange={(e) => setForm({ ...form, financial_year: e.target.value })}
               >
+                <option value="2027-2028">2027-2028</option>
+                <option value="2026-2027">2026-2027</option>
                 <option value="2025-2026">2025-2026</option>
                 <option value="2024-2025">2024-2025</option>
                 <option value="2023-2024">2023-2024</option>

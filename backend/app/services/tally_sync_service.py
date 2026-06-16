@@ -68,6 +68,7 @@ class TallySyncService:
         connector = TallyConnector(
             host=client.tally_host,
             port=client.tally_port,
+            company_name=client.company_name,
         )
         response_xml = await connector.test_connection()
         companies = TallyParser.parse_company_info(response_xml)
@@ -104,6 +105,7 @@ class TallySyncService:
         connector = TallyConnector(
             host=client.tally_host,
             port=client.tally_port,
+            company_name=client.company_name,
         )
 
         try:
@@ -179,6 +181,46 @@ class TallySyncService:
                 f"[Sync {sync_job.id[:8]}] Synced {len(parsed_ledgers)} ledgers"
             )
 
+            # ── Step 2.5: Sync Missing Virtual Ledgers (Opening Stock) ──
+            try:
+                import xml.etree.ElementTree as ET
+                from app.services.tally_parser import _sanitize_xml
+                tb_xml = await connector.fetch_trial_balance()
+                tb_root = ET.fromstring(_sanitize_xml(tb_xml))
+                current_name = None
+                stock_balance = Decimal("0.00")
+                for child in tb_root:
+                    if child.tag == "DSPACCNAME":
+                        current_name = child.find("DSPDISPNAME").text.strip() if child.find("DSPDISPNAME") is not None and child.find("DSPDISPNAME").text else None
+                    elif child.tag == "DSPACCINFO" and current_name:
+                        if current_name == "Opening Stock":
+                            dramt_elem = child.find(".//DSPCLDRAMTA")
+                            if dramt_elem is not None and dramt_elem.text:
+                                stock_balance = Decimal(dramt_elem.text.strip().replace(",", ""))
+                        current_name = None
+
+                if abs(stock_balance) > Decimal("0.01"):
+                    stock_ledger_exists = any(
+                        l.name == "Opening Stock" or l.parent == "Stock-in-Hand"
+                        for l in parsed_ledgers
+                    )
+                    if not stock_ledger_exists:
+                        logger.info(f"Adding virtual Opening Stock ledger with balance: {stock_balance}")
+                        virtual_stock = TallyLedger(
+                            client_id=client_id,
+                            name="Opening Stock",
+                            parent="Stock-in-Hand",
+                            tally_guid="virtual-opening-stock",
+                            alter_id=9999,
+                            opening_balance=stock_balance,
+                            closing_balance=stock_balance,
+                        )
+                        self.db.add(virtual_stock)
+                        await self.db.flush()
+                        ledger_name_to_id["Opening Stock"] = virtual_stock.id
+            except Exception as tb_err:
+                logger.warning(f"Failed to fetch/parse trial balance for virtual stock: {tb_err}")
+
             # ── Step 3: Sync Vouchers ────────────────────────────────────
             logger.info(f"[Sync {sync_job.id[:8]}] Fetching vouchers...")
             from_date, to_date = _fy_dates(client.financial_year)
@@ -231,6 +273,12 @@ class TallySyncService:
             logger.info(
                 f"[Sync {sync_job.id[:8]}] Synced {len(parsed_vouchers)} vouchers"
             )
+
+            # ── Step 4: Generate Schedule III Mappings ───────────────────
+            logger.info(f"[Sync {sync_job.id[:8]}] Generating Schedule III mappings...")
+            from app.services.schedule_iii_mapper import ScheduleIIIMapper
+            mapper = ScheduleIIIMapper(self.db)
+            await mapper.map_client(client_id)
 
             # ── Finalize ─────────────────────────────────────────────────
             sync_job.status = SyncStatus.COMPLETED
